@@ -6,16 +6,17 @@ import js2xml
 from js2xml.utils.vars import get_vars
 import json
 import re
-
+import time
 class AnimeSpider(scrapy.Spider):
     name = "AnimeSpider"
-    base_url = "https://animeflv.net/"
+    base_url = "https://www3.animeflv.net/"
     es = Elasticsearch(hosts="localhost")
     def start_requests(self):
         url = self.base_url+"browse?order=added"
         token,agent = cfscrape.get_tokens(url=url)
         self.token = token
         self.agent = agent
+        print(token,agent)
         yield scrapy.Request(url=url,callback=self.parse, cookies=token, headers={'User-Agent': agent})
 
     def parse(self,response):
@@ -31,7 +32,7 @@ class AnimeSpider(scrapy.Spider):
                                   headers={'User-Agent': self.agent})
     def AnimeData(self,res):
         data = {}
-        data["id"] = int(re.findall("\/[0-9]+\/",res.request.url)[0][1:-1])
+        #data["id"] = res.request.url.split("anime/")[1]# int(re.findall("\/[0-9]+\/",res.request.url)[0][1:-1])
         data["rating"] = float(res.xpath('//span[@id="votes_prmd"]/text()').extract_first())
         data["description"] = res.xpath('//div[@class="Description"]/p/text()').extract_first()
         data["img"] = res.xpath('//figure//img/@src').extract_first()
@@ -43,6 +44,8 @@ class AnimeSpider(scrapy.Spider):
         script_vars = get_vars(js2xml.parse(script))
         anime_info = script_vars["anime_info"]
         data["name"] = anime_info[1]
+        data["id"] = anime_info[0]
+        data["slug"] = anime_info[2]
         episodes_info = sorted(script_vars["episodes"])
         data["episodes_num"] = len(episodes_info)
         episodes = {}
@@ -51,18 +54,19 @@ class AnimeSpider(scrapy.Spider):
                              "img": "https://cdn.animeflv.net/screenshots/%s/%s/th_3.jpg"%(anime_info[0],e[0])}
         animeRel = []
         for a in res.xpath('//ul[contains(@class,"ListAnmRel")]//li'):
-            aid = re.findall("\/[0-9]+\/",a.xpath('a/@href').extract_first())[0][1:-1]
+            slug = a.xpath('a/@href').extract_first().split("anime/")[1]
             atype = a.xpath('text()').extract_first()
             name = a.xpath('a/text()').extract_first()
-            animeRel.append({"id":aid,"name":name,"type":atype})
+            animeRel.append({"name":name,"type":atype,"slug":slug})
         data["animeRel"] = animeRel
-        data["episodes"] = episodes
-        try:
-            res = self.es.index(index="animeflv",doc_type="anime",body=data,id=data["id"])
-        except Exception as e:
-            with open("animes/%s.json"%data["id"],'w') as f:
-                json.dump(data,f)
-                f.write(str(e))
+        #data["episodes"] = episodes
+        #try:
+        #    res = self.es.index(index="animeflv",doc_type="anime",body=data,id=data["id"])
+        #except Exception as e:
+        with open("animes/anime.json",'a') as f:
+            json.dump(data,f)
+            f.write('\n')
+            #f.write(str(e))
 proc = CrawlerProcess()
 proc.crawl(AnimeSpider)
 proc.start()
